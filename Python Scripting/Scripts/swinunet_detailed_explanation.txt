@@ -1,0 +1,363 @@
+================================================================================
+  HOW THE SWINUNET DENOISING SYSTEM WORKS — DETAILED EXPLANATION
+================================================================================
+
+This document explains every part of the SwinUNet denoising pipeline:
+the model architecture, data loading, training process, testing process,
+and why SwinUNet is well-suited for document image denoising.
+
+
+================================================================================
+  PART 1 — THE DATA PIPELINE  (swinunet_data.py)
+================================================================================
+
+PURPOSE:
+  Loads paired clean and noisy images, extracts small patches from them,
+  and feeds those patches to the model during training.
+
+HOW IT WORKS:
+
+  1. Pairing Images
+     The dataset folder has two sub-folders: Clean/ and Noisy/.
+     Images are matched by filename — "img001.png" in Clean/ is paired
+     with "img001.png" in Noisy/.
+
+  2. Caching Into RAM
+     All images (1001 pairs) are loaded once at startup and stored in
+     memory as uint8 arrays (1 byte per pixel). This avoids slow disk
+     reads during training. Storing as uint8 instead of float32 uses
+     8x less RAM.
+
+  3. Patch Extraction
+     Full images are large (2339 x 1654 pixels). The GPU cannot process
+     them whole during training. Instead, a random 128x128 pixel square
+     (patch) is cropped from each image. The same crop position is used
+     for both the clean and noisy version so they stay aligned.
+
+  4. Data Augmentation (Training Only)
+     Each patch is randomly flipped (horizontal, vertical) and rotated
+     (0, 90, 180, or 270 degrees). This makes the model see more variety
+     without needing more images.
+
+  5. Repeat Factor
+     Each image generates multiple different random patches per epoch
+     (REPEAT = 8). So 901 training images produce 901 x 8 = 7208
+     patches per epoch.
+
+  6. Validation Patches
+     For validation, patches are taken from the centre of the image
+     (no randomness) so results are consistent across epochs.
+
+  7. Train/Val Split
+     Images are split 90/10 by index (not by patch). This ensures the
+     model is never validated on images it trained on.
+
+
+================================================================================
+  PART 2 — THE MODEL ARCHITECTURE  (swinunet_model.py)
+================================================================================
+
+PURPOSE:
+  Takes a noisy grayscale image (pixel values 0–1) and outputs a clean
+  version of the same size.
+
+OVERALL STRUCTURE:
+
+  Noisy Image
+       |
+  [Conv 3x3]  ──────── Shallow Feature Extraction (1 channel → 96 channels)
+       |
+  [RSTB Block 1]  ──── Deep Feature Extraction
+  [RSTB Block 2]       (4 blocks, each with 6 Swin Transformer layers)
+  [RSTB Block 3]       (24 transformer layers total)
+  [RSTB Block 4]
+       |
+  [LayerNorm]
+  [Conv 3x3]  ──────── Feature Residual Connection (+ shallow features)
+       |
+  [Conv 3x3]  ──────── Image Reconstruction (96 channels → 1 channel)
+       |
+  [+ Noisy Input]  ─── Global Residual Learning
+       |
+  [Clamp 0–1]
+       |
+  Denoised Image
+
+
+KEY COMPONENTS EXPLAINED:
+
+  a) Shallow Feature Extraction
+     A single 3x3 convolution converts the 1-channel grayscale input
+     into a 96-channel feature map. This gives the transformer layers
+     a rich starting representation.
+
+  b) RSTB (Residual Swin Transformer Block)
+     Each RSTB contains 6 Swin Transformer layers followed by a 3x3
+     convolution, plus a residual (skip) connection around the whole
+     block. The residual connection means each block only needs to
+     learn the "correction" to apply, not the full output — this makes
+     training easier and faster.
+
+  c) Swin Transformer Layer
+     This is the core building block. Unlike standard convolutions
+     which only look at a small local area (e.g., 3x3 pixels), a
+     transformer can learn relationships between pixels that are
+     farther apart through "attention".
+
+     How attention works (simplified):
+       - Each pixel creates three vectors: Query (Q), Key (K), Value (V).
+       - Q of one pixel is compared against K of all other pixels to
+         get an attention score (how important is pixel B to pixel A?).
+       - The output for pixel A is a weighted sum of all Values (V),
+         weighted by those attention scores.
+       - This lets the model look at a wider context when deciding
+         what the clean pixel should be.
+
+  d) Window-Based Attention
+     Full attention on a 2339x1654 image would be impossibly expensive
+     (every pixel attends to every other pixel). SwinUNet divides the
+     image into small 8x8 pixel windows and runs attention only within
+     each window. This makes the cost manageable.
+
+  e) Shifted Windows (SW-MSA)
+     If attention only happens within fixed windows, pixels near
+     window borders cannot communicate with neighbouring windows.
+     Shifted-Window MSA (SW-MSA) solves this by shifting the window
+     grid by half a window size on alternating layers. Layers alternate:
+       - Layer 1: regular windows (W-MSA)
+       - Layer 2: shifted windows (SW-MSA)
+       - Layer 3: regular windows
+       - ... and so on
+     This lets information flow across the entire image.
+
+  f) Relative Position Bias
+     Attention scores include a learned bias based on how far apart
+     two pixels are within a window. This teaches the model that nearby
+     pixels are usually more relevant than distant ones.
+
+  g) Global Residual Learning
+     The final output is: denoised = model_output + noisy_input.
+     This means the model only needs to learn the noise pattern (the
+     difference between noisy and clean), not reconstruct the entire
+     image from scratch. Since noise is typically small, this makes
+     the learning task much simpler.
+
+  h) Reflect Padding
+     Images may not divide evenly into 8x8 windows. The model
+     automatically adds reflect-padding to the edges so the size
+     is a multiple of 8, then removes it from the output. This lets
+     the model handle any image size without resizing.
+
+  i) Gradient Checkpointing
+     During training, intermediate results are normally stored in GPU
+     memory for backpropagation. With 2.2 million parameters, this
+     uses too much VRAM (>8 GB). Gradient checkpointing discards some
+     intermediates and recomputes them during the backward pass. This
+     trades a small speed penalty for a large memory saving.
+
+  MODEL SIZE:
+     Parameters: 2,244,433  (~2.2 million)
+     Embedding dimension: 96
+     Attention heads: 6 per block
+     RSTB blocks: 4
+     Transformer layers per block: 6  (24 total)
+
+
+================================================================================
+  PART 3 — THE TRAINING PROCESS  (swinunet_train.py)
+================================================================================
+
+PURPOSE:
+  Teaches the model to convert noisy images into clean ones by showing it
+  thousands of example pairs and adjusting weights to minimise error.
+
+TRAINING LOOP (simplified):
+
+  For each epoch (1 pass through all training data):
+      For each batch of 16 patch pairs:
+          1. Feed 16 noisy patches into the model → get 16 predicted outputs
+          2. Compare predictions to the 16 clean patches using the loss function
+          3. Compute gradients (how each weight should change to reduce loss)
+          4. Update all weights using the optimizer
+      After all batches:
+          5. Run validation (no weight updates) to check generalisation
+          6. Save model checkpoints
+
+LOSS FUNCTION (what the model tries to minimise):
+
+  The loss has three parts, all working together:
+
+  a) Charbonnier Loss (main component)
+     A smooth version of the absolute pixel difference between the
+     predicted and clean images. Penalises large and small errors
+     equally (unlike MSE which over-penalises large errors).
+     Formula: sqrt((predicted - clean)^2 + epsilon^2)
+
+  b) SSIM Loss (weight = 0.15)
+     SSIM (Structural Similarity) measures whether the image structure
+     (edges, textures, contrast patterns) is preserved, not just
+     individual pixel values. The loss is (1 - SSIM), so the model is
+     rewarded for keeping structure intact.
+
+  c) Edge Loss (weight = 0.05)
+     Uses Sobel filters to detect horizontal and vertical edges in both
+     the predicted and clean images, then penalises the difference.
+     This specifically protects text strokes and sharp edges from being
+     smeared or erased by the model.
+
+  Total Loss = Charbonnier + 0.15 * (1 - SSIM) + 0.05 * EdgeLoss
+
+OPTIMIZER:
+
+  AdamW with learning rate 2e-4 and weight decay 1e-4.
+  AdamW is an improved version of Adam that properly handles weight
+  regularisation. It keeps running averages of gradients (momentum)
+  for faster convergence.
+
+LEARNING RATE SCHEDULE:
+
+  Cosine Annealing — the learning rate starts at 2e-4 and smoothly
+  decreases to 1e-6 following a cosine curve over all epochs. Large
+  steps at the start help the model learn quickly; small steps at the
+  end help it fine-tune without overshooting.
+
+MIXED PRECISION TRAINING (AMP):
+
+  The model's forward pass runs in float16 (half precision) on the GPU.
+  This halves memory usage and speeds up computation on modern GPUs.
+
+  IMPORTANT: The loss function runs in float32 (full precision), not
+  float16. This is critical because the SSIM and Edge Loss computations
+  can produce values that overflow float16's small range (max ~65504),
+  which would cause NaN gradients and completely break training.
+
+GRADIENT CLIPPING:
+
+  Gradients are clipped to a maximum norm of 1.0 before updating weights.
+  This prevents sudden large gradients from destabilising the model.
+
+MODEL SAVING:
+
+  Two models are saved every epoch:
+    - best_swinunet.pth  — the weights from the epoch with the highest
+      validation PSNR so far
+    - latest_swinunet.pth — the weights from the most recent epoch
+
+  On the next training run, the model resumes from the best checkpoint
+  instead of starting from scratch.
+
+EARLY STOPPING:
+
+  If validation PSNR does not improve for 20 consecutive epochs, training
+  stops to avoid wasting time.
+
+TRAINING METRICS:
+
+  Tracked every epoch:
+    - Train Loss / Train PSNR — how well the model fits training data
+    - Val Loss / Val PSNR / Val SSIM — how well it generalises to unseen
+      images (the important metric)
+    - Learning Rate — current LR from the scheduler
+
+
+================================================================================
+  PART 4 — THE TESTING PROCESS  (swinunet_test.py)
+================================================================================
+
+PURPOSE:
+  Uses the trained model to denoise full-resolution images and measure
+  quality against ground truth (if available).
+
+HOW IT WORKS:
+
+  1. Load Model
+     The saved checkpoint (best or latest) is loaded into the same
+     SwinUNet architecture. The model is set to evaluation mode
+     (disables dropout, uses running statistics for normalisation).
+
+  2. Tiled Inference
+     Full images (2339 x 1654) are too large to process in one GPU pass.
+     The image is split into overlapping 256x256 tiles:
+
+       - Stride = 256 - 32 = 224 pixels (tiles overlap by 32 pixels)
+       - Each tile is processed independently through the model
+       - Overlapping regions are averaged together
+       - This removes visible seam artifacts at tile boundaries
+
+  3. Output
+     The denoised image is saved to Data/Denoised/ with the same filename.
+
+  4. Metrics (when ground truth exists)
+     If a matching clean image exists in Data/Clean/, the script computes:
+       - PSNR (Peak Signal-to-Noise Ratio) — higher is better.
+         Measures pixel-level accuracy. 20+ dB is good, 30+ dB is
+         excellent.
+       - SSIM (Structural Similarity Index) — closer to 1.0 is better.
+         Measures structural/perceptual similarity. 0.90+ is good.
+
+
+================================================================================
+  PART 5 — WHY SWINUNET IS BENEFICIAL FOR DOCUMENT DENOISING
+================================================================================
+
+  1. LONG-RANGE CONTEXT
+     Standard CNNs (convolutional neural networks) only look at a small
+     local area per layer (e.g., 3x3 or 5x5 pixels). To gather context
+     from farther away, they need many stacked layers. SwinUNet uses
+     transformer attention, which can relate any pixel to any other pixel
+     within its 8x8 window — and adjacent windows communicate through
+     shifted windows. This means the model can understand the broader
+     structure of text lines, spacing, and layout.
+
+  2. HANDLES MULTIPLE NOISE TYPES
+     The training data includes 19 different noise types (Gaussian blur,
+     motion blur, salt-and-pepper, speckle, stripe patterns, etc.).
+     A single SwinUNet model learns to handle all of them, whereas
+     traditional methods would need separate hand-tuned filters for each.
+
+  3. PRESERVES TEXT
+     The combination of SSIM loss and Sobel edge loss teaches the model
+     to keep text readable. The model is penalised during training for
+     any edge blurring or text erasure, so it learns to suppress noise
+     while leaving sharp text strokes intact.
+
+  4. RESIDUAL LEARNING
+     By learning only the noise pattern (output = clean residual + input)
+     instead of the full clean image, the model starts from a strong
+     baseline (the input itself) and only needs to make small corrections.
+     This speeds up training and improves accuracy.
+
+  5. EFFICIENT ATTENTION
+     Full transformer attention on a 2339x1654 image would require
+     comparing ~3.9 million pixels against each other — completely
+     infeasible. Window-based attention (8x8 = 64 pixels per window)
+     makes the cost linear with image size, so the model can process
+     any resolution.
+
+  6. GRAYSCALE PRESERVATION
+     Unlike traditional binarisation (which reduces the output to only
+     black and white), SwinUNet outputs a full grayscale image. This
+     preserves subtle shading, soft edges, and anti-aliased text — all
+     important for OCR accuracy downstream.
+
+
+================================================================================
+  PART 6 — FILE SUMMARY
+================================================================================
+
+  File                     Purpose
+  ---------------------------------------------------------------------------
+  swinunet_model.py        Defines the SwinUNet neural network architecture
+  swinunet_data.py         Loads and preprocesses paired image data
+  swinunet_train.py        Trains the model, saves best/latest checkpoints
+  swinunet_test.py         Runs inference on test images, computes metrics
+  denoise_for_ocr.py       Traditional OpenCV-based denoising (no learning)
+  synthetic_noise_add.py   Generates noisy versions of clean images for
+                           creating the training dataset
+
+  Model Files:
+  best_swinunet.pth        Best model weights (highest validation PSNR)
+  latest_swinunet.pth      Most recent model weights
+
+
+================================================================================

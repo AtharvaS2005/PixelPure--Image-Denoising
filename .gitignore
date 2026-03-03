@@ -1,0 +1,18 @@
+# ── Virtual Environments ──
+.venv/
+.venv311/
+
+# ── IDE ──
+.vscode/
+
+# ── Python Cache ──
+__pycache__/
+*.pyc
+*.pyo
+
+# ── Model Weights ──
+*.pth
+*.onnx
+
+# ── Image Data (Training / Testing / Output) ──
+Python Scripting/Data/

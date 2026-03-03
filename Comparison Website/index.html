@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Image Denoising Comparison — Traditional vs SwinUNet</title>
+<style>
+/* ── Reset & Variables — Indigo & White ─────────────────────────── */
+:root{--pri:#6366f1;--pri-d:#4f46e5;--pri-l:#818cf8;--pri-bg:#eef2ff;--ok:#10b981;--warn:#f59e0b;--err:#ef4444;
+--bg:#f5f3ff;--bg2:#ede9fe;--card:#ffffff;--card2:#f5f3ff;--txt:#1e1b4b;--mut:#6b7280;--bdr:#c7d2fe;
+--rad:12px;--shd:0 1px 3px rgba(99,102,241,.08),0 1px 2px rgba(0,0,0,.04);
+--shd-lg:0 10px 25px -5px rgba(99,102,241,.12)}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--txt);line-height:1.6}
+img{display:block;max-width:100%;height:auto}
+::selection{background:var(--pri);color:#fff}
+
+/* ── Header ────────────────────────────────────────────────────── */
+header{background:linear-gradient(135deg,#4338ca 0%,#6366f1 50%,#818cf8 100%);
+color:#fff;padding:38px 24px 34px;text-align:center}
+header h1{font-size:26px;font-weight:700;margin-bottom:6px;letter-spacing:-.2px}
+header p{font-size:15px;opacity:.85}
+
+/* ── Container ─────────────────────────────────────────────────── */
+.container{max-width:1480px;margin:0 auto;padding:24px}
+
+/* ── Cards ─────────────────────────────────────────────────────── */
+.card{background:var(--card);border:1px solid var(--bdr);border-radius:var(--rad);box-shadow:var(--shd);
+padding:24px;margin-bottom:20px}
+.card h2{font-size:18px;margin-bottom:14px;font-weight:600;color:var(--txt)}
+
+/* ── Model Status ──────────────────────────────────────────────── */
+.model-bar{display:flex;align-items:center;gap:10px;padding:12px 18px;border-radius:var(--rad);
+margin-bottom:20px;font-size:14px;font-weight:500;transition:background .3s;border:1px solid var(--bdr)}
+.model-bar.loading{background:#eef2ff;color:#4338ca;border-color:#c7d2fe}
+.model-bar.ready{background:#ecfdf5;color:#065f46;border-color:#a7f3d0}
+.model-bar.error{background:#fef2f2;color:#991b1b;border-color:#fecaca}
+.model-bar .icon{font-size:18px}
+.model-bar .info{flex:1}
+.model-bar button{padding:5px 14px;border:1px solid currentColor;border-radius:6px;background:transparent;
+color:inherit;cursor:pointer;font-size:13px}
+.model-bar button:hover{opacity:.75}
+#modelFileInput{display:none}
+
+/* ── Dropzone ──────────────────────────────────────────────────── */
+.dropzone{border:2px dashed var(--bdr);border-radius:var(--rad);padding:48px 24px;text-align:center;
+cursor:pointer;transition:border-color .2s,background .2s;position:relative}
+.dropzone:hover,.dropzone.dragover{border-color:var(--pri);background:#eef2ff}
+.dropzone svg{margin:0 auto 12px;display:block;color:var(--mut)}
+.dropzone p{font-size:15px;color:var(--mut)}
+.dropzone p.small{font-size:13px;margin-top:4px;opacity:.65}
+.dropzone input{position:absolute;inset:0;opacity:0;cursor:pointer}
+
+/* ── Thumbnail Strip ───────────────────────────────────────────── */
+.thumb-strip{display:flex;gap:10px;padding:10px 0;overflow-x:auto;margin-bottom:16px;min-height:0}
+.thumb-strip:empty{display:none}
+.thumb{width:72px;height:72px;border-radius:8px;overflow:hidden;cursor:pointer;border:3px solid transparent;
+flex-shrink:0;transition:border-color .15s,box-shadow .15s;position:relative;background:var(--bg2)}
+.thumb img{width:100%;height:100%;object-fit:cover}
+.thumb.active{border-color:var(--pri);box-shadow:0 0 8px rgba(99,102,241,.3)}
+.thumb .idx{position:absolute;bottom:2px;right:4px;font-size:10px;background:rgba(67,56,202,.8);
+color:#fff;padding:1px 5px;border-radius:4px}
+
+/* ── Action Bar ────────────────────────────────────────────────── */
+.action-bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:20px}
+.btn{padding:10px 28px;border:none;border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;
+transition:background .15s,opacity .15s}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-primary{background:var(--pri);color:#fff}
+.btn-primary:hover:not(:disabled){background:var(--pri-d)}
+.btn-secondary{background:var(--bg2);color:var(--txt);border:1px solid var(--bdr)}
+.btn-secondary:hover:not(:disabled){background:#ddd6fe;color:var(--txt)}
+
+/* ── Progress ──────────────────────────────────────────────────── */
+.progress-wrap{width:100%;margin-bottom:20px;display:none}
+.progress-wrap.show{display:block}
+.progress-outer{height:22px;background:var(--bg2);border-radius:11px;overflow:hidden;position:relative}
+.progress-inner{height:100%;background:linear-gradient(90deg,#4338ca,#6366f1,#818cf8);border-radius:11px;
+transition:width .25s;width:0}
+.progress-text{font-size:13px;color:var(--mut);margin-top:6px;text-align:center}
+
+/* ── Comparison Grid ───────────────────────────────────────────── */
+.comparison{display:none;gap:20px;margin-top:8px}
+.comparison.show{display:grid;grid-template-columns:repeat(3,1fr)}
+@media(max-width:1060px){.comparison.show{grid-template-columns:1fr}}
+.panel{background:var(--card);border:1px solid var(--bdr);border-radius:var(--rad);box-shadow:var(--shd);
+overflow:hidden;display:flex;flex-direction:column}
+.panel h3{font-size:15px;font-weight:600;padding:14px 16px 10px;text-align:center;color:var(--pri-d);
+border-bottom:1px solid var(--bdr)}
+.panel .frame{flex:1;display:flex;align-items:center;justify-content:center;background:#faf8ff;
+min-height:200px;padding:8px;cursor:zoom-in;position:relative}
+.panel .frame img{max-height:70vh;border-radius:4px}
+.panel .frame .placeholder{color:var(--mut);font-size:14px}
+.panel .bar{display:flex;justify-content:center;padding:10px;gap:10px;border-top:1px solid var(--bdr)}
+.btn-dl{padding:7px 18px;border:1px solid var(--bdr);border-radius:6px;background:var(--card);
+color:var(--pri-d);font-size:13px;cursor:pointer;transition:background .15s,color .15s}
+.btn-dl:hover{background:var(--pri);color:#fff;border-color:var(--pri)}
+.btn-dl:disabled{opacity:.4;cursor:not-allowed}
+.btn-dl:disabled:hover{background:var(--card);color:var(--pri-d);border-color:var(--bdr)}
+
+/* ── Lightbox ──────────────────────────────────────────────────── */
+.lightbox{position:fixed;inset:0;background:rgba(30,27,75,.88);display:none;align-items:center;
+justify-content:center;z-index:1000;cursor:zoom-out;padding:24px}
+.lightbox.show{display:flex}
+.lightbox img{max-width:95vw;max-height:95vh;border-radius:6px;box-shadow:0 4px 30px rgba(0,0,0,.25)}
+
+/* ── Spinner ───────────────────────────────────────────────────── */
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner{width:18px;height:18px;border:2.5px solid rgba(99,102,241,.25);border-top-color:#6366f1;
+border-radius:50%;animation:spin .6s linear infinite;display:inline-block;vertical-align:middle;margin-right:8px}
+</style>
+</head>
+
+<body>
+<header>
+  <h1>Image Denoising Comparison</h1>
+  <p>Traditional Scripting &nbsp;vs&nbsp; SwinUNet Deep Learning</p>
+</header>
+
+<div class="container">
+
+  <!-- Model Status -->
+  <div class="model-bar loading" id="modelBar">
+    <span class="icon" id="modelIcon">⏳</span>
+    <span class="info" id="modelInfo">Loading SwinUNet model&hellip;</span>
+    <button id="loadModelBtn" style="display:none" onclick="document.getElementById('modelFileInput').click()">Select model.onnx</button>
+    <input type="file" id="modelFileInput" accept=".onnx">
+  </div>
+
+  <!-- Upload -->
+  <div class="card">
+    <h2>Upload Noisy Images</h2>
+    <div class="dropzone" id="dropzone">
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <p>Drag &amp; drop noisy images here, or click to browse</p>
+      <p class="small">PNG, JPG, BMP, TIFF &mdash; multiple files supported</p>
+      <input type="file" id="fileInput" multiple accept="image/*">
+    </div>
+  </div>
+
+  <!-- Thumbnails -->
+  <div class="thumb-strip" id="thumbStrip"></div>
+
+  <!-- Actions -->
+  <div class="action-bar">
+    <button class="btn btn-primary" id="denoiseBtn" disabled>Denoise &amp; Compare</button>
+    <button class="btn btn-secondary" id="denoiseAllBtn" disabled>Denoise All Pages</button>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-outer"><div class="progress-inner" id="progressBar"></div></div>
+    <div class="progress-text" id="progressText"></div>
+  </div>
+
+  <!-- Comparison -->
+  <div class="comparison" id="compGrid">
+    <div class="panel">
+      <h3>Original (Noisy)</h3>
+      <div class="frame" id="frameOrig"><span class="placeholder">Upload an image</span></div>
+      <div class="bar">&nbsp;</div>
+    </div>
+    <div class="panel">
+      <h3>Traditional Denoising</h3>
+      <div class="frame" id="frameTrad"><span class="placeholder">&mdash;</span></div>
+      <div class="bar"><button class="btn-dl" id="dlTrad" disabled>&#11123; Download</button></div>
+    </div>
+    <div class="panel">
+      <h3>SwinUNet Denoising</h3>
+      <div class="frame" id="frameSwin"><span class="placeholder">&mdash;</span></div>
+      <div class="bar"><button class="btn-dl" id="dlSwin" disabled>&#11123; Download</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox for full-size view -->
+<div class="lightbox" id="lightbox"><img id="lightboxImg"></div>
+
+<!-- ONNX Runtime Web (WASM backend) -->
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.js"></script>
+
+<script>
+/* =================================================================
+   STATE
+   ================================================================= */
+const S = {
+  images: [],       // {name,w,h,gray:Uint8Array,origURL,tradGray?,swinGray?,tradURL?,swinURL?}
+  idx: -1,
+  session: null,
+  busy: false,
+  tradWorker: null,
+};
+
+/* =================================================================
+   DOM REFS
+   ================================================================= */
+const $=id=>document.getElementById(id);
+const modelBar=$('modelBar'), modelIcon=$('modelIcon'), modelInfo=$('modelInfo'),
+      loadModelBtn=$('loadModelBtn'), modelFileInput=$('modelFileInput'),
+      dropzone=$('dropzone'), fileInput=$('fileInput'), thumbStrip=$('thumbStrip'),
+      denoiseBtn=$('denoiseBtn'), denoiseAllBtn=$('denoiseAllBtn'),
+      progressWrap=$('progressWrap'), progressBar=$('progressBar'), progressText=$('progressText'),
+      compGrid=$('compGrid'),
+      frameOrig=$('frameOrig'), frameTrad=$('frameTrad'), frameSwin=$('frameSwin'),
+      dlTrad=$('dlTrad'), dlSwin=$('dlSwin'),
+      lightbox=$('lightbox'), lightboxImg=$('lightboxImg');
+
+/* =================================================================
+   UTILITIES
+   ================================================================= */
+function grayToDataURL(gray,w,h){
+  const c=document.createElement('canvas');c.width=w;c.height=h;
+  const ctx=c.getContext('2d'),id=ctx.createImageData(w,h);
+  for(let i=0;i<gray.length;i++){id.data[i*4]=gray[i];id.data[i*4+1]=gray[i];id.data[i*4+2]=gray[i];id.data[i*4+3]=255;}
+  ctx.putImageData(id,0,0);return c.toDataURL('image/png');
+}
+
+function downloadDataURL(url,name){
+  const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();document.body.removeChild(a);
+}
+
+function showProgress(pct,text){
+  progressWrap.classList.add('show');
+  progressBar.style.width=Math.round(pct*100)+'%';
+  progressText.textContent=text||'';
+}
+function hideProgress(){progressWrap.classList.remove('show');progressBar.style.width='0';}
+
+function setFrame(frame,url){
+  if(url){frame.innerHTML='<img src="'+url+'">';frame.querySelector('img').onclick=()=>{lightboxImg.src=url;lightbox.classList.add('show');};}
+  else frame.innerHTML='<span class="placeholder">&mdash;</span>';
+}
+
+/* small async yield so the browser can repaint */
+const tick=()=>new Promise(r=>setTimeout(r,0));
+
+/* =================================================================
+   IMAGE LOADING
+   ================================================================= */
+function loadImageAsGray(file){
+  return new Promise((res,rej)=>{
+    const reader=new FileReader();
+    reader.onload=()=>{
+      const img=new Image();
+      img.onload=()=>{
+        const c=document.createElement('canvas');c.width=img.naturalWidth;c.height=img.naturalHeight;
+        const ctx=c.getContext('2d');ctx.drawImage(img,0,0);
+        const px=ctx.getImageData(0,0,c.width,c.height).data;
+        const gray=new Uint8Array(c.width*c.height);
+        for(let i=0;i<gray.length;i++) gray[i]=Math.round(.299*px[i*4]+.587*px[i*4+1]+.114*px[i*4+2]);
+        res({name:file.name, w:c.width, h:c.height, gray, origURL:c.toDataURL('image/png')});
+      };
+      img.onerror=()=>rej(new Error('Cannot decode '+file.name));
+      img.src=reader.result;
+    };
+    reader.onerror=()=>rej(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+/* =================================================================
+   TRADITIONAL DENOISING — runs inside a Web Worker (off main thread)
+   ================================================================= */
+const TRAD_WORKER_CODE = `
+/* ── Traditional denoising pipeline (mirrors denoise_for_ocr.py) ─────
+   Runs entirely inside a Web Worker so the main thread stays responsive.
+   ──────────────────────────────────────────────────────────────────── */
+
+function contrastStretch(g,w,h){
+  let mn=255,mx=0;
+  for(let i=0;i<g.length;i++){if(g[i]<mn)mn=g[i];if(g[i]>mx)mx=g[i];}
+  if(mx===mn)return new Uint8Array(g);
+  const r=new Uint8Array(g.length),range=mx-mn;
+  for(let i=0;i<g.length;i++) r[i]=Math.round((g[i]-mn)/range*255);
+  return r;
+}
+
+function medianFilter3(g,w,h){
+  const r=new Uint8Array(w*h),nb=new Uint8Array(9);
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    let k=0;
+    for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+      const ny=Math.min(Math.max(y+dy,0),h-1), nx=Math.min(Math.max(x+dx,0),w-1);
+      nb[k++]=g[ny*w+nx];
+    }
+    nb.sort(); r[y*w+x]=nb[4];
+  }
+  return r;
+}
+
+function morphErode(g,w,h,kw,kh){
+  const r=new Uint8Array(w*h),hw=kw>>1,hh=kh>>1;
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    let v=255;
+    for(let ky=0;ky<kh;ky++) for(let kx=0;kx<kw;kx++){
+      const ny=Math.min(Math.max(y+ky-hh,0),h-1), nx=Math.min(Math.max(x+kx-hw,0),w-1);
+      if(g[ny*w+nx]<v) v=g[ny*w+nx];
+    }
+    r[y*w+x]=v;
+  }
+  return r;
+}
+
+function morphDilate(g,w,h,kw,kh){
+  const r=new Uint8Array(w*h),hw=kw>>1,hh=kh>>1;
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    let v=0;
+    for(let ky=0;ky<kh;ky++) for(let kx=0;kx<kw;kx++){
+      const ny=Math.min(Math.max(y+ky-hh,0),h-1), nx=Math.min(Math.max(x+kx-hw,0),w-1);
+      if(g[ny*w+nx]>v) v=g[ny*w+nx];
+    }
+    r[y*w+x]=v;
+  }
+  return r;
+}
+
+function morphOpen(g,w,h,kw,kh){return morphDilate(morphErode(g,w,h,kw,kh),w,h,kw,kh);}
+function morphClose(g,w,h,kw,kh){return morphErode(morphDilate(g,w,h,kw,kh),w,h,kw,kh);}
+
+function adaptiveThreshold(g,w,h,blockSize,C){
+  const half=blockSize>>1;
+  const sigma=0.3*((blockSize-1)*0.5-1)+0.8;
+  const kern=new Float64Array(blockSize);
+  let ks=0;
+  for(let i=0;i<blockSize;i++){const x=i-half;kern[i]=Math.exp(-(x*x)/(2*sigma*sigma));ks+=kern[i];}
+  for(let i=0;i<blockSize;i++) kern[i]/=ks;
+  const tmp=new Float64Array(w*h);
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    let v=0;
+    for(let k=-half;k<=half;k++){const nx=Math.min(Math.max(x+k,0),w-1);v+=g[y*w+nx]*kern[k+half];}
+    tmp[y*w+x]=v;
+  }
+  const blr=new Float64Array(w*h);
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    let v=0;
+    for(let k=-half;k<=half;k++){const ny=Math.min(Math.max(y+k,0),h-1);v+=tmp[ny*w+x]*kern[k+half];}
+    blr[y*w+x]=v;
+  }
+  const r=new Uint8Array(w*h);
+  for(let i=0;i<w*h;i++) r[i]=g[i]>(blr[i]-C)?255:0;
+  return r;
+}
+
+self.onmessage = function(e) {
+  const {gray, w, h} = e.data;
+  let g = contrastStretch(new Uint8Array(gray), w, h);
+  g = medianFilter3(g, w, h);
+  g = morphOpen(g, w, h, 1, 2);
+  g = morphClose(g, w, h, 2, 2);
+  g = adaptiveThreshold(g, w, h, 25, 15);
+  self.postMessage({result: g.buffer}, [g.buffer]);
+};
+`;
+
+/* Create the worker once from a Blob URL (no extra file needed) */
+function createTradWorker(){
+  const blob = new Blob([TRAD_WORKER_CODE], {type:'application/javascript'});
+  return new Worker(URL.createObjectURL(blob));
+}
+
+/* Run traditional denoising in the Web Worker — returns a Promise */
+function traditionalDenoiseAsync(gray, w, h){
+  return new Promise((resolve, reject)=>{
+    if(!S.tradWorker) S.tradWorker = createTradWorker();
+    const worker = S.tradWorker;
+    /* Copy the buffer so the worker can own it */
+    const buf = gray.buffer.slice(0);
+    worker.onmessage = e => resolve(new Uint8Array(e.data.result));
+    worker.onerror = e => reject(new Error('Worker error: '+e.message));
+    worker.postMessage({gray: buf, w, h}, [buf]);
+  });
+}
+
+/* =================================================================
+   SWINUNET ONNX INFERENCE (tiled, 256×256, overlap=32)
+   — yields to UI every tile so Chrome never shows "not responding"
+   ================================================================= */
+async function swinunetDenoise(gray,w,h,onProg){
+  if(!S.session) throw new Error('Model not loaded');
+  const TILE=256, OVER=32, STRIDE=TILE-OVER;
+
+  const acc=new Float64Array(w*h), wt=new Float64Array(w*h);
+
+  /* Build tile list */
+  const tiles=[];
+  for(let y=0;y<h;y+=STRIDE) for(let x=0;x<w;x+=STRIDE){
+    const ye=Math.min(y+TILE,h), xe=Math.min(x+TILE,w);
+    tiles.push({ys:Math.max(0,ye-TILE), xs:Math.max(0,xe-TILE), ye, xe});
+  }
+
+  for(let i=0;i<tiles.length;i++){
+    const {ys,xs,ye,xe}=tiles[i], th=ye-ys, tw=xe-xs;
+
+    /* Build input tensor (pad smaller tiles with reflection of edge pixels) */
+    const inp=new Float32Array(TILE*TILE);
+    for(let ty=0;ty<TILE;ty++) for(let tx=0;tx<TILE;tx++){
+      const sy=ty<th?ty:2*th-2-ty, sx=tx<tw?tx:2*tw-2-tx;
+      const cy=Math.min(Math.max(sy,0),th-1), cx=Math.min(Math.max(sx,0),tw-1);
+      inp[ty*TILE+tx]=gray[(ys+cy)*w+(xs+cx)]/255;
+    }
+
+    const tensor=new ort.Tensor('float32',inp,[1,1,TILE,TILE]);
+    const res=await S.session.run({input:tensor});
+    const out=res.output.data;
+
+    for(let ty=0;ty<th;ty++) for(let tx=0;tx<tw;tx++){
+      const idx=(ys+ty)*w+(xs+tx);
+      acc[idx]+=out[ty*TILE+tx]; wt[idx]+=1;
+    }
+
+    if(onProg) onProg((i+1)/tiles.length);
+    await tick();   /* yield to UI EVERY tile — prevents "page not responding" */
+  }
+
+  const result=new Uint8Array(w*h);
+  for(let i=0;i<w*h;i++) result[i]=Math.round(Math.min(255,Math.max(0,(acc[i]/Math.max(wt[i],1e-8))*255)));
+  return result;
+}
+
+/* =================================================================
+   MODEL LOADING
+   ================================================================= */
+async function loadModelFromBuffer(buf){
+  try{
+    ort.env.wasm.wasmPaths='https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/';
+    S.session=await ort.InferenceSession.create(buf,{executionProviders:['wasm']});
+    modelBar.className='model-bar ready';modelIcon.textContent='✓';
+    modelInfo.textContent='SwinUNet model loaded — ready for inference';
+    loadModelBtn.style.display='none';
+  }catch(e){
+    modelBar.className='model-bar error';modelIcon.textContent='✗';
+    modelInfo.textContent='Model load failed: '+e.message;
+    loadModelBtn.style.display='inline-block';
+    console.error(e);
+  }
+}
+
+async function initModel(){
+  try{
+    const resp=await fetch('./model.onnx');
+    if(!resp.ok) throw new Error(resp.status+' '+resp.statusText);
+    const buf=await resp.arrayBuffer();
+    await loadModelFromBuffer(buf);
+  }catch(e){
+    console.warn('Auto-load failed:',e.message);
+    modelBar.className='model-bar error';modelIcon.textContent='!';
+    modelInfo.textContent='Could not auto-load model.onnx — please select it manually';
+    loadModelBtn.style.display='inline-block';
+  }
+}
+
+modelFileInput.addEventListener('change',async e=>{
+  const f=e.target.files[0];if(!f)return;
+  modelBar.className='model-bar loading';modelIcon.textContent='⏳';modelInfo.textContent='Loading model…';
+  const buf=await f.arrayBuffer();
+  await loadModelFromBuffer(buf);
+});
+
+/* =================================================================
+   UPLOAD HANDLING
+   ================================================================= */
+async function handleFiles(files){
+  for(const f of files){
+    if(!f.type.startsWith('image/'))continue;
+    try{
+      const img=await loadImageAsGray(f);
+      S.images.push(img);
+    }catch(e){console.error(e);}
+  }
+  renderThumbs();
+  if(S.idx<0&&S.images.length) selectImage(0);
+  updateButtons();
+}
+
+dropzone.addEventListener('dragover',e=>{e.preventDefault();dropzone.classList.add('dragover');});
+dropzone.addEventListener('dragleave',()=>dropzone.classList.remove('dragover'));
+dropzone.addEventListener('drop',e=>{e.preventDefault();dropzone.classList.remove('dragover');handleFiles(e.dataTransfer.files);});
+fileInput.addEventListener('change',e=>{handleFiles(e.target.files);fileInput.value='';});
+
+/* =================================================================
+   THUMBNAILS & NAVIGATION
+   ================================================================= */
+function renderThumbs(){
+  thumbStrip.innerHTML='';
+  S.images.forEach((im,i)=>{
+    const d=document.createElement('div');d.className='thumb'+(i===S.idx?' active':'');
+    d.innerHTML='<img src="'+im.origURL+'"><span class="idx">'+(i+1)+'</span>';
+    d.onclick=()=>selectImage(i);
+    thumbStrip.appendChild(d);
+  });
+}
+
+function selectImage(i){
+  S.idx=i;
+  renderThumbs();
+  displayCurrent();
+  updateButtons();
+}
+
+function displayCurrent(){
+  const im=S.images[S.idx];if(!im)return;
+  compGrid.classList.add('show');
+  setFrame(frameOrig,im.origURL);
+  setFrame(frameTrad,im.tradURL||null);
+  setFrame(frameSwin,im.swinURL||null);
+  dlTrad.disabled=!im.tradURL;
+  dlSwin.disabled=!im.swinURL;
+}
+
+function updateButtons(){
+  const has=S.images.length>0&&S.idx>=0;
+  denoiseBtn.disabled=!has||S.busy;
+  denoiseAllBtn.disabled=S.images.length<1||S.busy;
+}
+
+/* =================================================================
+   DENOISE PIPELINE
+   ================================================================= */
+async function processOne(i){
+  const im=S.images[i];
+  selectImage(i);
+
+  /* Traditional — runs in Web Worker (won't block UI) */
+  showProgress(0,'Running traditional denoising…');
+  await tick();
+  const t0=performance.now();
+  im.tradGray=await traditionalDenoiseAsync(im.gray,im.w,im.h);
+  im.tradURL=grayToDataURL(im.tradGray,im.w,im.h);
+  const tradMs=Math.round(performance.now()-t0);
+  showProgress(0.3,'Traditional done ('+tradMs+' ms). Starting SwinUNet…');
+  displayCurrent();
+  await tick();
+
+  /* SwinUNet */
+  if(S.session){
+    const t1=performance.now();
+    im.swinGray=await swinunetDenoise(im.gray,im.w,im.h,p=>{
+      showProgress(0.3+p*0.7,'SwinUNet: '+Math.round(p*100)+'%');
+    });
+    im.swinURL=grayToDataURL(im.swinGray,im.w,im.h);
+    const swinMs=Math.round(performance.now()-t1);
+    showProgress(1,'Done! Traditional: '+tradMs+' ms — SwinUNet: '+(swinMs/1000).toFixed(1)+' s');
+  }else{
+    showProgress(1,'Traditional done. SwinUNet skipped (model not loaded).');
+  }
+  displayCurrent();
+}
+
+denoiseBtn.addEventListener('click',async()=>{
+  if(S.busy||S.idx<0)return;
+  S.busy=true;updateButtons();
+  try{await processOne(S.idx);}catch(e){alert('Error: '+e.message);console.error(e);}
+  S.busy=false;updateButtons();
+});
+
+denoiseAllBtn.addEventListener('click',async()=>{
+  if(S.busy)return;
+  S.busy=true;updateButtons();
+  try{
+    for(let i=0;i<S.images.length;i++){
+      showProgress(0,'Processing page '+(i+1)+'/'+S.images.length+'…');
+      await processOne(i);
+    }
+    showProgress(1,'All '+S.images.length+' pages processed!');
+  }catch(e){alert('Error: '+e.message);console.error(e);}
+  S.busy=false;updateButtons();
+});
+
+/* =================================================================
+   DOWNLOADS
+   ================================================================= */
+dlTrad.addEventListener('click',()=>{const im=S.images[S.idx];if(im&&im.tradURL) downloadDataURL(im.tradURL,'traditional_'+im.name);});
+dlSwin.addEventListener('click',()=>{const im=S.images[S.idx];if(im&&im.swinURL) downloadDataURL(im.swinURL,'swinunet_'+im.name);});
+
+/* =================================================================
+   LIGHTBOX
+   ================================================================= */
+lightbox.addEventListener('click',()=>lightbox.classList.remove('show'));
+
+/* =================================================================
+   INIT
+   ================================================================= */
+initModel();
+</script>
+</body>
+</html>

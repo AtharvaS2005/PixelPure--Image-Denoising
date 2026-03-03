@@ -1,0 +1,126 @@
+================================================================================
+  TRADITIONAL DENOISING vs DEEP LEARNING (SwinUNet) DENOISING
+================================================================================
+
+
+1. WHAT IS TRADITIONAL DENOISING? (denoise_for_ocr.py)
+-------------------------------------------------------
+
+Traditional denoising uses hand-written rules and standard image processing
+operations from OpenCV. There is no learning involved — the same fixed steps
+are applied to every image, regardless of what kind of noise is present.
+
+The denoise_for_ocr.py script applies the following fixed pipeline:
+
+  Step 1 — Contrast Stretching
+      Stretches pixel values so the darkest pixel becomes 0 and the
+      brightest becomes 255. Makes the image look sharper overall.
+
+  Step 2 — Median Filter (3x3)
+      Replaces each pixel with the middle value of its 3x3 neighbourhood.
+      Good at removing salt-and-pepper noise, but blurs fine details.
+
+  Step 3 — Morphological Opening (1x2 kernel)
+      Erodes then dilates the image with a small rectangle.
+      Removes tiny isolated bright dots (noise), but can eat into
+      thin text strokes.
+
+  Step 4 — Morphological Closing (2x2 kernel)
+      Dilates then erodes. Fills small gaps inside text characters.
+
+  Step 5 — Adaptive Binarisation
+      Converts the image to pure black-and-white using a local threshold.
+      This destroys all grayscale information — the output has only two
+      values: 0 and 255.
+
+
+2. WHAT IS DEEP LEARNING DENOISING? (SwinUNet)
+-----------------------------------------------
+
+Instead of fixed rules, SwinUNet is a neural network that learns how to
+remove noise by studying thousands of examples.
+
+During training, the model is shown pairs of images:
+  - A noisy version  (input)
+  - The matching clean version  (target)
+
+It adjusts millions of internal weights until its output looks as close to
+the clean image as possible. Once trained, the model can remove noise types
+it has never explicitly been programmed for.
+
+
+3. KEY DIFFERENCES
+------------------
+
+  Aspect                  Traditional                 SwinUNet (DL)
+  --------------------------------------------------------------------------
+  How it works            Fixed rules applied          Learns from data
+                          in order                     (clean/noisy pairs)
+
+  Noise handling          Each filter targets one       Handles many noise
+                          type (e.g. median for         types at once because
+                          salt-and-pepper)              it learns general
+                                                        patterns
+
+  Adaptability            Same steps for every          Adapts to each image
+                          image — no adaptation         based on learned
+                                                        features
+
+  Output type             Binary (black/white only)     Full grayscale
+                          after binarisation             (preserves shading
+                                                         and detail)
+
+  Text preservation       Morphological ops can          Edge-aware loss
+                          erode thin strokes or          actively protects
+                          merge close characters          text during training
+
+  Quality (PSNR)          Generally lower — hard          Higher — the model
+                          to balance noise removal        optimises pixel
+                          and detail preservation          accuracy directly
+                          with fixed thresholds
+
+  Setup effort            Simple — just run the           Requires GPU,
+                          script, no training              training data, and
+                          needed                           training time
+
+  Speed                   Very fast (pure CPU ops)        Slower per image
+                                                          (GPU inference), but
+                                                          much higher quality
+
+
+4. WHY SwinUNet IS BETTER FOR THIS TASK
+-----------------------------------------
+
+  a) The document images contain 19 different noise types (blur, salt-and-
+     pepper, speckle, stripe, etc.). A fixed pipeline cannot handle all of
+     them well. SwinUNet learns to handle all noise types in one model.
+
+  b) Traditional binarisation throws away all grayscale information.
+     SwinUNet outputs a clean grayscale image, keeping shading and soft
+     edges intact — important for downstream OCR.
+
+  c) SwinUNet uses an edge-preserving loss function (Sobel-based) that
+     specifically penalises the model if it erases or blurs text strokes.
+     Traditional morphology has no such safeguard.
+
+  d) Training metrics (PSNR ~22 dB, SSIM ~0.94) show the DL output is
+     measurably closer to the original clean image than what traditional
+     filters achieve.
+
+
+5. WHEN TO USE EACH
+---------------------
+
+  Use traditional denoising when:
+    - You need a quick result with no setup.
+    - The noise is simple (e.g. only salt-and-pepper).
+    - You do not have a GPU or training data.
+
+  Use SwinUNet when:
+    - You need high-quality denoising across multiple noise types.
+    - Preserving text readability and grayscale detail matters.
+    - You have a GPU and paired clean/noisy training data.
+    - The denoised images will be fed into OCR or further analysis.
+
+
+================================================================================

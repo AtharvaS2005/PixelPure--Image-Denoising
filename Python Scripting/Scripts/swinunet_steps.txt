@@ -1,0 +1,28 @@
+Steps to Train and Test Swin-Unet Model
+
+1. Activate the Python 3.11 virtual environment:
+   - In terminal: .venv311\Scripts\Activate.ps1
+
+2. (Optional) Verify CUDA is available:
+   - python -c "import torch; print('CUDA available:', torch.cuda.is_available())"
+
+3. Train the Swin-Unet model:
+   - In terminal, run:
+     python Python Scripting/Scripts/swinunet_train.py
+   - This will start training using Data/Noisy and Data/Clean images.
+   - Training progress and loss will be shown in terminal.
+   - The best model will be saved as best_swinunet.pth.
+
+4. Test the trained model:
+   - In terminal, run:
+     python Python Scripting/Scripts/swinunet_test.py
+   - This will denoise images from Data/Test using the trained model.
+   - Denoised images will be saved to Data/Denoised.
+
+5. Compare results:
+   - Review denoised images in Data/Denoised for quality and comparison with traditional methods.
+
+Tips:
+- Make sure Data/Noisy, Data/Clean, and Data/Test folders are populated with images.
+- Training and testing scripts are fully GPU-accelerated if CUDA is available.
+- You can adjust batch size, epochs, and other parameters in the scripts for further tuning.

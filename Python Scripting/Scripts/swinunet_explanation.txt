@@ -1,0 +1,35 @@
+Swin-Unet Model Preparation and Training Explanation
+
+1. Model Architecture:
+- Swin-Unet is a deep learning model combining Swin Transformer blocks with a U-Net structure.
+- The model uses patch embedding to split images into patches, then processes them with Swin Transformer blocks for feature extraction.
+- Encoder blocks extract hierarchical features, while decoder blocks reconstruct the denoised image.
+- Skip connections help preserve spatial information.
+
+2. Data Preparation:
+- Training uses paired images from Data/Noisy (input) and Data/Clean (target).
+- Images are resized, normalized, and converted to tensors for efficient GPU processing.
+- DataLoader batches and shuffles data for robust training.
+
+3. Training Process:
+- The model is trained using MSE loss (mean squared error) to minimize the difference between denoised output and clean target.
+- AdamW optimizer is used for stable and efficient convergence.
+- Learning rate scheduling (ReduceLROnPlateau) adapts learning rate based on training progress.
+- Early stopping prevents overfitting by halting training if loss does not improve for several epochs.
+- Model checkpoints are saved for the best performing model.
+
+4. CUDA Acceleration:
+- Training is performed on NVIDIA RTX 4060 GPU using CUDA, greatly speeding up computation.
+- All tensors and the model are moved to GPU automatically if available.
+
+5. Testing and Evaluation:
+- After training, the best model is loaded and used to denoise images from Data/Test.
+- Denoised outputs are saved to Data/Denoised for comparison.
+
+6. Best Practices:
+- Data augmentation, normalization, and regularization are used to prevent underfitting/overfitting.
+- Batch size, learning rate, and patience are tuned for optimal performance.
+- The pipeline is modular, allowing easy adjustments and improvements.
+
+Summary:
+Swin-Unet leverages transformer-based feature extraction and U-Net's spatial preservation for high-quality image denoising. Training is efficient, robust, and fully GPU-accelerated, ensuring best results for comparison with traditional methods.
