@@ -1,8 +1,8 @@
-# Image Denoising — Traditional Scripting vs SwinUNet Deep Learning
+# PixelPure — Image Denoising Comparison
 
 A complete image denoising pipeline that compares **traditional computer-vision scripting** (contrast stretch → median filter → morphological operations → adaptive threshold) against a **SwinUNet deep learning model** (Swin Transformer + U-Net architecture).
 
-Includes a **browser-based comparison website** that runs both methods side-by-side using ONNX Runtime Web — no backend required.
+Includes **PixelPure**, a browser-based comparison website that runs both methods side-by-side using ONNX Runtime Web — no backend required.
 
 ---
 
