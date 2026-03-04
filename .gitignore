@@ -13,6 +13,8 @@ __pycache__/
 # ── Model Weights ──
 *.pth
 *.onnx
+# Allow the website's bundled model
+!Comparison Website/model.onnx
 
 # ── Image Data (Training / Testing / Output) ──
 Python Scripting/Data/

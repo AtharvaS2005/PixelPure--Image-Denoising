@@ -462,10 +462,10 @@ async function loadModelFromBuffer(buf){
 
 async function initModel(){
   /* Try local first (works when served alongside index.html),
-     then fall back to GitHub-hosted copy via jsDelivr CDN. */
+     then fall back to GitHub raw content. */
   const urls=[
     './model.onnx',
-    'https://cdn.jsdelivr.net/gh/AtharvaS2005/PixelPure--Image-Denoising@main/Comparison%20Website/model.onnx'
+    'https://raw.githubusercontent.com/AtharvaS2005/PixelPure--Image-Denoising/main/Comparison%20Website/model.onnx'
   ];
   for(const url of urls){
     try{
