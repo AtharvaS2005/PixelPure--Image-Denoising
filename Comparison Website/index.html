@@ -178,8 +178,8 @@ border-radius:50%;animation:spin .6s linear infinite;display:inline-block;vertic
 <!-- Lightbox for full-size view -->
 <div class="lightbox" id="lightbox"><img id="lightboxImg"></div>
 
-<!-- ONNX Runtime Web (WASM backend) -->
-<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.min.js"></script>
+<!-- ONNX Runtime Web (WebGPU + WASM backends) -->
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/ort.all.min.js"></script>
 
 <script>
 /* =================================================================
@@ -425,7 +425,7 @@ async function swinunetDenoise(gray,w,h,onProg){
 async function loadModelFromBuffer(buf){
   try{
     ort.env.wasm.wasmPaths='https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/';
-    S.session=await ort.InferenceSession.create(buf,{executionProviders:['wasm']});
+    S.session=await ort.InferenceSession.create(buf,{executionProviders:['webgpu','wasm']});
     modelBar.className='model-bar ready';modelIcon.textContent='✓';
     modelInfo.textContent='SwinUNet model loaded — ready for inference';
     loadModelBtn.style.display='none';
