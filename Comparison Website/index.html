@@ -108,6 +108,17 @@ justify-content:center;z-index:1000;cursor:zoom-out;padding:24px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .spinner{width:18px;height:18px;border:2.5px solid rgba(99,102,241,.25);border-top-color:#6366f1;
 border-radius:50%;animation:spin .6s linear infinite;display:inline-block;vertical-align:middle;margin-right:8px}
+
+/* ── Time Estimate Panel ───────────────────────────────────────── */
+.time-info{background:#eef2ff;border:1px solid #c7d2fe;border-radius:var(--rad);padding:18px 22px;
+margin-bottom:20px;font-size:13px;color:#312e81;line-height:1.7}
+.time-info summary{font-weight:600;font-size:14px;cursor:pointer;color:var(--pri-d);margin-bottom:6px}
+.time-info summary:hover{color:var(--pri)}
+.time-info table{width:100%;border-collapse:collapse;margin-top:10px;font-size:13px}
+.time-info th,.time-info td{text-align:center;padding:6px 10px;border-bottom:1px solid #c7d2fe}
+.time-info th{font-weight:600;color:#4338ca;background:#e0e7ff}
+.time-info tr:last-child td{border-bottom:none}
+.time-info .note{margin-top:10px;font-size:12px;color:#6366f1;opacity:.85}
 </style>
 </head>
 
@@ -142,6 +153,18 @@ border-radius:50%;animation:spin .6s linear infinite;display:inline-block;vertic
 
   <!-- Thumbnails -->
   <div class="thumb-strip" id="thumbStrip"></div>
+
+  <!-- Processing Time Estimates -->
+  <details class="time-info">
+    <summary>&#9202; Estimated SwinUNet Processing Times</summary>
+    <table>
+      <tr><th>Image Size</th><th>WebGPU (GPU)</th><th>WASM (CPU)</th></tr>
+      <tr><td>&lt; 1 MP (e.g. 800&times;600)</td><td>~5 &ndash; 10 sec</td><td>~30 &ndash; 60 sec</td></tr>
+      <tr><td>1 &ndash; 4 MP (e.g. 1500&times;2000)</td><td>~15 &ndash; 30 sec</td><td>~2 &ndash; 5 min</td></tr>
+      <tr><td>4+ MP (e.g. 3000&times;4000)</td><td>~30 &ndash; 60 sec</td><td>~5 &ndash; 15 min</td></tr>
+    </table>
+    <p class="note">Traditional denoising completes near-instantly (&lt; 1 sec). SwinUNet uses tiled 256&times;256 inference &mdash; larger images require more tiles. This site uses WebGPU when your browser supports it, otherwise falls back to WASM (CPU). Chrome 113+ supports WebGPU.</p>
+  </details>
 
   <!-- Actions -->
   <div class="action-bar">
