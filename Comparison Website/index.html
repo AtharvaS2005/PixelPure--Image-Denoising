@@ -461,17 +461,29 @@ async function loadModelFromBuffer(buf){
 }
 
 async function initModel(){
-  try{
-    const resp=await fetch('./model.onnx');
-    if(!resp.ok) throw new Error(resp.status+' '+resp.statusText);
-    const buf=await resp.arrayBuffer();
-    await loadModelFromBuffer(buf);
-  }catch(e){
-    console.warn('Auto-load failed:',e.message);
-    modelBar.className='model-bar error';modelIcon.textContent='!';
-    modelInfo.textContent='Could not auto-load model.onnx — please select it manually';
-    loadModelBtn.style.display='inline-block';
+  /* Try local first (works when served alongside index.html),
+     then fall back to GitHub-hosted copy via jsDelivr CDN. */
+  const urls=[
+    './model.onnx',
+    'https://cdn.jsdelivr.net/gh/AtharvaS2005/PixelPure--Image-Denoising@main/Comparison%20Website/model.onnx'
+  ];
+  for(const url of urls){
+    try{
+      modelBar.className='model-bar loading';modelIcon.textContent='⏳';
+      modelInfo.textContent='Loading model from '+(url.startsWith('.')?'local server':'CDN')+'…';
+      const resp=await fetch(url);
+      if(!resp.ok) throw new Error(resp.status+' '+resp.statusText);
+      const buf=await resp.arrayBuffer();
+      await loadModelFromBuffer(buf);
+      return;                       // success — stop trying
+    }catch(e){
+      console.warn('Load from',url,'failed:',e.message);
+    }
   }
+  /* Both sources failed */
+  modelBar.className='model-bar error';modelIcon.textContent='!';
+  modelInfo.textContent='Could not auto-load model.onnx — please select it manually';
+  loadModelBtn.style.display='inline-block';
 }
 
 modelFileInput.addEventListener('change',async e=>{
